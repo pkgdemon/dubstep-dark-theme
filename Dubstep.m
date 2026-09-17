@@ -125,6 +125,19 @@
   return 12.0f;
 }
 
+// Corner radius of the title bar's top corners. Window managers that draw
+// GSTheme decorations use this to round decorated windows.
+- (CGFloat)titlebarCornerRadius
+{
+  return 10.0;
+}
+
+// Corner radius of the bottom corners of windows with a resize bar.
+- (CGFloat)windowBottomCornerRadius
+{
+  return 10.0;
+}
+
 // Returns the vertical overlap for submenus.
 - (CGFloat)menuSubmenuVerticalOverlap
 {
