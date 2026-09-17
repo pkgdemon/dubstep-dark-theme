@@ -4,7 +4,6 @@
 
 @interface Dubstep: GSTheme
 {
-    id menuRegistry;
     NSUserDefaults *defaults;
 }
 - (void)drawPathButton:(NSBezierPath *)path
