@@ -18,6 +18,10 @@
 	NSMenuInterfaceStyle = NSMacintoshInterfaceStyle;
     };
     GSThemeIcon = "ThemeIcon.png";
+    GSThemeImages = {
+	common_Zoom = "common_Maximize.png";
+	common_ZoomH = "common_MaximizeH.png";
+    };
     GSThemeLicense = GPLv3;
     GSThemePreview = "ThemePreview.png";
     GSThemeTiles = {

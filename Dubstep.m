@@ -1,49 +1,8 @@
-#import "GNUstepGUI/GSWindowDecorationView.h"
 #import "Dubstep.h"
 #import "Dubstep+Button.h"
 #import <AppKit/AppKit.h>
 
-// cache the DBusMenu bundle's principal class
-static Class _menuRegistryClass;
-
 @implementation Dubstep
-
-- (Class)_findDBusMenuRegistryClass
-{
-  NSString   *path;
-  NSBundle   *bundle;
-  NSArray    *paths = NSSearchPathForDirectoriesInDomains(
-                        NSLibraryDirectory, NSAllDomainsMask, YES);
-  NSUInteger  count = [paths count];
-
-  if (Nil != _menuRegistryClass)
-    return _menuRegistryClass;
-
-  while (count-- > 0)
-    {
-      path = [paths objectAtIndex:count];
-      path = [path stringByAppendingPathComponent:@"Bundles"];
-      path = [path stringByAppendingPathComponent:@"DBusMenu"];
-      path = [path stringByAppendingPathExtension:@"bundle"];
-      bundle = [NSBundle bundleWithPath:path];
-      if (bundle)
-        {
-          if ((_menuRegistryClass = [bundle principalClass]) != Nil)
-            break;
-        }
-    }
-  return _menuRegistryClass;
-}
-
-- (id)initWithBundle:(NSBundle *)bundle
-{
-  if ((self = [super initWithBundle:bundle]) != nil)
-    {
-      // only D-Bus menu registry initialization here
-      menuRegistry = [[self _findDBusMenuRegistryClass] new];
-    }
-  return self;
-}
 
 + (NSColor *)controlStrokeColor
 {
@@ -51,36 +10,6 @@ static Class _menuRegistryClass;
                                           green:0.4
                                            blue:0.4
                                           alpha:1]);
-}
-
-// Ensuring the title bar is drawn
-- (void)drawTitleBar:(NSRect)frame inView:(NSView *)view state:(GSThemeControlState)state {
-    // Set title bar color
-    NSColor *titleBarColor = [self defaultBackgroundColor]; // Match title bar color with window color
-    [titleBarColor setFill];
-    NSRectFill(frame);
-
-    // Optionally, add a line at the bottom of the title bar
-    NSColor *borderColor = [NSColor colorWithCalibratedWhite:0.3 alpha:1.0]; // Lighter gray
-    NSBezierPath *borderPath = [NSBezierPath bezierPath];
-    [borderPath moveToPoint:NSMakePoint(NSMinX(frame), NSMinY(frame))];
-    [borderPath lineToPoint:NSMakePoint(NSMaxX(frame), NSMinY(frame))];
-    [borderColor setStroke];
-    [borderPath stroke];
-}
-
-// Overriding the method to draw window decorations
-- (void)drawWindowDecoration:(NSRect)rect inView:(NSView *)view {
-    // Draw the title bar
-    [self drawTitleBar:NSMakeRect(rect.origin.x, rect.origin.y + rect.size.height - 22, rect.size.width, 22)
-                inView:view
-                state:GSThemeNormalState];
-}
-
-// Initialize with bundle. Add setup code for theme if needed.
-- (void)initWithBundle
-{
-  // Additional setup code for your theme, if needed 
 }
 
 // Converts RGBA values to NSColor.
@@ -220,59 +149,80 @@ static Class _menuRegistryClass;
   return 1;
 }
 
-// Draws a rounded window with specified rect and radius.
-- (void)drawRoundedWindow:(NSRect)rect radius:(CGFloat)radius {
-    NSBezierPath *roundedRectPath = [NSBezierPath bezierPathWithRoundedRect:rect xRadius:14.0 yRadius:14.0];
-    
-    // Clip to the rounded rectangle path
-    [roundedRectPath addClip];
-
-    // Fill the background with the rounded shape
-    [roundedRectPath fill];
+// Draws a path button with specified state.
+- (void)drawPathButton:(NSBezierPath *)path
+                    in:(NSView *)view
+                 state:(GSThemeControlState)state {
+    [[NSColor blackColor] setStroke];
+    [path stroke];
 }
 
-// Draws the window border.
+#pragma mark - Window decorations
+
+// Title bar background for the given input state (GSTitleBarKey/Normal/Main)
+- (NSColor *)titleBarColorForState:(int)inputState
+{
+  NSColor *color = [NSColor windowFrameColor];
+  return (inputState == 1) ? [color shadowWithLevel:0.15] : color;
+}
+
+- (NSColor *)windowBorderColorForDecorations
+{
+  NSColor *color = [self colorNamed:@"windowBorderColor" state:GSThemeNormalState];
+  return color ? color : [NSColor windowFrameColor];
+}
+
+// Title text attributes, built per call so a theme switch picks up new colours
+// (and nothing autoreleased is kept in a static).
+- (NSDictionary *)titleTextAttributesForState:(int)inputState
+{
+  NSString *name = @"keyWindowFrameTextColor";
+  if (inputState == 1)
+    name = @"normalWindowFrameTextColor";
+  else if (inputState == 2)
+    name = @"mainWindowFrameTextColor";
+
+  NSColor *textColor = [self colorNamed:name state:GSThemeNormalState];
+  if (textColor == nil)
+    textColor = [NSColor windowFrameTextColor];
+
+  NSMutableParagraphStyle *style = AUTORELEASE([[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
+  [style setLineBreakMode:NSLineBreakByTruncatingTail];
+
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+            [NSFont titleBarFontOfSize:0], NSFontAttributeName,
+            textColor, NSForegroundColorAttributeName,
+            style, NSParagraphStyleAttributeName,
+            nil];
+}
+
+// Draws the window border: title bar at the top, resize bar at the bottom,
+// both using the same metrics the window frame offsets are computed from.
 - (void)drawWindowBorder:(NSRect)rect
                withFrame:(NSRect)frame
             forStyleMask:(unsigned int)styleMask
                    state:(int)inputState
                 andTitle:(NSString *)title
 {
-    NSColor *color = [self defaultBackgroundColor];
-    [color setFill];
+  if (styleMask & (NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask))
+    {
+      CGFloat height = [self titlebarHeight];
+      NSRect titleBarRect = NSMakeRect(0, NSHeight(frame) - height, NSWidth(frame), height);
 
-    // Create a path for a rounded rectangle
-    NSBezierPath *roundedRectPath = [NSBezierPath bezierPathWithRoundedRect:rect xRadius:14.0 yRadius:14.0];
-    
-    // Clip to the rounded rectangle path
-    [roundedRectPath addClip];
+      if (NSIntersectsRect(rect, titleBarRect))
+        [self drawTitleBarRect:titleBarRect
+                  forStyleMask:styleMask
+                         state:inputState
+                      andTitle:title];
+    }
 
-    // Fill the background with the rounded shape
-    [roundedRectPath fill];
+  if (styleMask & NSResizableWindowMask)
+    {
+      NSRect resizeBarRect = NSMakeRect(0, 0, NSWidth(frame), [self resizebarHeight]);
 
-    // Make the border invisible by setting the stroke color to clear
-    [[NSColor clearColor] setStroke];
-    [roundedRectPath setLineWidth:0.0];
-    [roundedRectPath stroke];
-
-    // Set the title bar color to match the window background color
-    NSColor *titleBarColor = color;
-    [titleBarColor setFill];
-    NSRect titleBarFrame = NSMakeRect(rect.origin.x, rect.origin.y + rect.size.height - 22, rect.size.width, 22);
-    // Adjust the y-origin to move the title bar up or down
-    titleBarFrame.origin.y -= 9;  // Increase this value to move the title bar down, decrease to move it up
-    NSBezierPath *titleBarPath = [NSBezierPath bezierPathWithRect:titleBarFrame];
-    [titleBarPath fill];
-
-    // Draw the application title in the title bar
-    NSDictionary *attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:14],
-                                  NSForegroundColorAttributeName: [NSColor whiteColor] };
-    NSSize textSize = [title sizeWithAttributes:attributes];
-    NSPoint textOrigin = NSMakePoint(NSMidX(titleBarFrame) - textSize.width / 2,
-                                     NSMidY(titleBarFrame) - textSize.height / 2);
-    [title drawAtPoint:textOrigin withAttributes:attributes];
-
-    NSDebugLog(@"Title drawn: %@", title);
+      if (NSIntersectsRect(rect, resizeBarRect))
+        [self drawResizeBarRect:resizeBarRect];
+    }
 }
 
 // Provides the standard window button for a given button type.
@@ -285,8 +235,7 @@ static Class _menuRegistryClass;
   [newButton setImagePosition:NSImageOnly];
   [newButton setBordered:NO];
   [newButton setTag:button];
-  
-  // Configure button images and actions based on button type
+
   switch (button)
     {
       case NSWindowCloseButton:
@@ -302,129 +251,100 @@ static Class _menuRegistryClass;
         break;
 
       case NSWindowZoomButton:
-        // FIXME: Configure zoom button
-        [newButton setImage:[NSImage imageNamed:@"common_Maximize"]];
-        [newButton setAlternateImage:[NSImage imageNamed:@"common_MaximizeH"]];
+        // common_Zoom is mapped to common_Maximize.png in the theme Info.plist
+        [newButton setImage:[NSImage imageNamed:@"common_Zoom"]];
+        [newButton setAlternateImage:[NSImage imageNamed:@"common_ZoomH"]];
         [newButton setAction:@selector(zoom:)];
         break;
 
       case NSWindowToolbarButton:
-        // FIXME: Configure toolbar button
         [newButton setAction:@selector(toggleToolbarShown:)];
         break;
+
       case NSWindowDocumentIconButton:
       default:
-        // FIXME: Configure document icon button
         break;
     }
 
-  return newButton;
+  return AUTORELEASE(newButton);
 }
 
-// Draws a path button with specified state.
-- (void)drawPathButton:(NSBezierPath *)path
-                    in:(NSView *)view
-                 state:(GSThemeControlState)state {
-    [[NSColor blackColor] setStroke];
-    [path stroke];
-}
-
-// Returns the frame for the close button within the window's bounds.
-- (NSRect)closeButtonFrameForBounds:(NSRect)rect
+// Buttons sit on the left, vertically centred: close, miniaturize, zoom.
+// These methods only compute geometry; they must not draw.
+- (NSRect)titleBarButtonFrameAtIndex:(NSUInteger)index forBounds:(NSRect)bounds
 {
-  NSRect newRect = NSMakeRect(rect.size.width - [self titlebarButtonSize] - [self titlebarPaddingRight],
-                            rect.size.height - [self titlebarButtonSize] - [self windowButtonPadding],
-                            [self titlebarButtonSize],
-                            [self titlebarButtonSize]);
-  newRect.origin.x = [self titlebarPaddingLeft];
-  newRect.origin.y -= [self windowButtonPadding];
+  CGFloat size = [self titlebarButtonSize];
+  CGFloat height = [self titlebarHeight];
 
-  NSColor *bgColor = [self defaultBackgroundColor];
-  [bgColor set];
-  NSRectFill(newRect);
-
-  return newRect;
+  return NSMakeRect([self titlebarPaddingLeft] + index * (size + [self windowButtonPadding]),
+                    NSHeight(bounds) - height + floor((height - size) / 2),
+                    size, size);
 }
 
-// Returns the frame for the miniaturize button within the window's bounds.
-- (NSRect)miniaturizeButtonFrameForBounds:(NSRect)rect
+- (NSRect)closeButtonFrameForBounds:(NSRect)bounds
 {
-  NSRect newRect = NSMakeRect(rect.size.width - [self titlebarButtonSize] - [self titlebarPaddingRight],
-                              rect.size.height - [self titlebarButtonSize] - [self windowButtonPadding],
-                              [self titlebarButtonSize],
-                              [self titlebarButtonSize]);
-  newRect.origin.x = [self titlebarPaddingLeft] + [self titlebarButtonSize] + 8;
-  newRect.origin.y -= [self windowButtonPadding];
-
-  return newRect;
+  return [self titleBarButtonFrameAtIndex:0 forBounds:bounds];
 }
 
-// Draws the title bar rectangle with the provided style mask, state, and title.
-static NSDictionary *titleTextAttributes[3] = {nil, nil, nil};
+- (NSRect)miniaturizeButtonFrameForBounds:(NSRect)bounds
+{
+  return [self titleBarButtonFrameAtIndex:1 forBounds:bounds];
+}
 
+- (NSRect)zoomButtonFrameForBounds:(NSRect)bounds
+{
+  return [self titleBarButtonFrameAtIndex:2 forBounds:bounds];
+}
+
+// Draws the title bar: full background, separator line and centred title.
 - (void)drawTitleBarRect:(NSRect)titleBarRect
             forStyleMask:(unsigned int)styleMask
                    state:(int)inputState
                 andTitle:(NSString *)title
 {
-    // Initialize title text attributes if not already done
-    if (!titleTextAttributes[0]) {
-        NSMutableParagraphStyle *paragraphStyle = [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
-        [paragraphStyle setLineBreakMode:NSLineBreakByClipping];
+  if (inputState < 0 || inputState > 2)
+    inputState = 1;
 
-        NSColor *keyColor = [self colorNamed:@"keyWindowFrameTextColor" state:GSThemeNormalState] ?: [NSColor windowFrameTextColor];
-        NSColor *normalColor = [self colorNamed:@"normalWindowFrameTextColor" state:GSThemeNormalState] ?: [NSColor redColor];
-        NSColor *mainColor = [self colorNamed:@"mainWindowFrameTextColor" state:GSThemeNormalState] ?: [NSColor windowFrameTextColor];
+  [[self titleBarColorForState:inputState] set];
+  NSRectFill(titleBarRect);
 
-        titleTextAttributes[0] = @{
-            NSFontAttributeName: [NSFont titleBarFontOfSize:0],
-            NSForegroundColorAttributeName: keyColor,
-            NSParagraphStyleAttributeName: paragraphStyle
-        };
+  [[self windowBorderColorForDecorations] set];
+  NSRectFill(NSMakeRect(NSMinX(titleBarRect), NSMinY(titleBarRect),
+                        NSWidth(titleBarRect), 1));
 
-        titleTextAttributes[1] = @{
-            NSFontAttributeName: [NSFont titleBarFontOfSize:0],
-            NSForegroundColorAttributeName: normalColor,
-            NSParagraphStyleAttributeName: paragraphStyle
-        };
+  if (!(styleMask & NSTitledWindowMask) || [title length] == 0)
+    return;
 
-        titleTextAttributes[2] = @{
-            NSFontAttributeName: [NSFont titleBarFontOfSize:0],
-            NSForegroundColorAttributeName: mainColor,
-            NSParagraphStyleAttributeName: paragraphStyle
-        };
+  // Keep the title clear of the buttons on the left, but centre it on the bar
+  NSDictionary *attrs = [self titleTextAttributesForState:inputState];
+  NSSize titleSize = [title sizeWithAttributes:attrs];
+  NSUInteger buttons = 3;
+  CGFloat inset = [self titlebarPaddingLeft] +
+    buttons * ([self titlebarButtonSize] + [self windowButtonPadding]);
+  NSRect textRect = NSInsetRect(titleBarRect, inset, 0);
 
-        RELEASE(paragraphStyle);
+  if (NSWidth(textRect) <= 0)
+    return;
+  if (titleSize.width < NSWidth(textRect))
+    {
+      textRect.origin.x = NSMidX(textRect) - titleSize.width / 2;
+      textRect.size.width = titleSize.width;
     }
+  textRect.origin.y = NSMidY(titleBarRect) - titleSize.height / 2;
+  textRect.size.height = titleSize.height;
 
-    // Draw the title if the window has a title bar
-    if (styleMask & NSTitledWindowMask) {
-        if (styleMask & NSMiniaturizableWindowMask) {
-            titleBarRect.origin.x += 18;
-            titleBarRect.size.width -= 18;
-        }
-        if (styleMask & NSClosableWindowMask) {
-            titleBarRect.size.width -= 18;
-        }
+  [title drawInRect:textRect withAttributes:attrs];
+}
 
-        titleBarRect.size.height = [self titlebarHeight] + ([self titlebarPaddingTop] * 2);
+// Draws the resize bar in the title bar colour with a separator line.
+- (void)drawResizeBarRect:(NSRect)resizeBarRect
+{
+  [[self titleBarColorForState:0] set];
+  NSRectFill(resizeBarRect);
 
-        NSSize titleSize = [title sizeWithAttributes:titleTextAttributes[inputState]];
-        if (titleSize.width <= titleBarRect.size.width) {
-            // Center the title horizontally and vertically
-            titleBarRect.origin.x = NSMidX(titleBarRect) - titleSize.width / 2;
-            titleBarRect.origin.y = NSMidY(titleBarRect) - titleSize.height / 2;
-            titleBarRect.size.height = titleSize.height;
-        }
-
-        // Fill the title bar background
-        NSColor *backgroundColor = [self defaultBackgroundColor];
-        [backgroundColor set];
-        NSRectFill(titleBarRect);
-
-        // Draw the title
-        [title drawInRect:titleBarRect withAttributes:titleTextAttributes[inputState]];
-    }
+  [[self windowBorderColorForDecorations] set];
+  NSRectFill(NSMakeRect(NSMinX(resizeBarRect), NSMaxY(resizeBarRect) - 1,
+                        NSWidth(resizeBarRect), 1));
 }
 
 // Draw the menu background and item cells
@@ -534,14 +454,6 @@ static NSDictionary *titleTextAttributes[3] = {nil, nil, nil};
 
     NSRectFillUsingOperation(cellFrame, NSCompositeClear);
     NSRectFill(cellFrame);
-}
-
-- (void)setMenu:(NSMenu*)menu forWindow:(NSWindow*)window
-{
-  if (menuRegistry)
-    [menuRegistry setMenu:menu forWindow:window];
-  else
-    [super setMenu:menu forWindow:window];
 }
 
 @end
